@@ -55,8 +55,15 @@
                     Content="Cancel" />
             </StackPanel>
 
+            <!-- Error message for form validation -->
+            <TextBlock
+                Foreground="Red"
+                FontWeight="Bold"
+                Margin="0,0,0,8"
+                TextWrapping="Wrap"
+                Text="{Binding FormErrorMessage}" />
+
             <!--  Employee List (to be replaced with ItemsControl and EmployeeCard)  -->
-            <!--  Example placeholder  -->
             <ItemsControl ItemsSource="{Binding Employees}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>

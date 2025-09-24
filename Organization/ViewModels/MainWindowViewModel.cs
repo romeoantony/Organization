@@ -4,6 +4,9 @@ using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using Organization.Models;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
+using System.Threading.Tasks;
+using System.Windows;
 
 namespace Organization.ViewModels
 {
@@ -22,6 +25,13 @@ namespace Organization.ViewModels
         public string NewEmployeePosition { get; set; } = string.Empty;
         public string NewEmployeeSalary { get; set; } = string.Empty;
 
+        private string _formErrorMessage = string.Empty;
+        public string FormErrorMessage
+        {
+            get => _formErrorMessage;
+            set => SetProperty(ref _formErrorMessage, value);
+        }
+
         public ICommand ShowAddEmployeeFormCommand { get; }
         public ICommand AddEmployeeCommand { get; }
         public ICommand CancelAddEmployeeCommand { get; }
@@ -38,20 +48,21 @@ namespace Organization.ViewModels
         public MainWindowViewModel()
         {
             ShowAddEmployeeFormCommand = new RelayCommand(_ => StartAddEmployee());
-            AddEmployeeCommand = new RelayCommand(_ => AddOrUpdateEmployee());
+            AddEmployeeCommand = new RelayCommand(async _ => await AddOrUpdateEmployeeAsync());
             CancelAddEmployeeCommand = new RelayCommand(_ => CancelAddOrEdit());
             EditEmployeeCommand = new RelayCommand(EditEmployee);
-            DeleteEmployeeCommand = new RelayCommand(DeleteEmployee);
+            DeleteEmployeeCommand = new RelayCommand(async param => await DeleteEmployeeAsync(param));
 
-            LoadEmployeesFromDatabase();
+            _ = LoadEmployeesFromDatabaseAsync();
         }
 
-        private void LoadEmployeesFromDatabase()
+        private async Task LoadEmployeesFromDatabaseAsync()
         {
             using var db = new OrganizationDbContext();
-            db.Database.EnsureCreated();
+            await db.Database.EnsureCreatedAsync();
+            var list = await db.Employees.ToListAsync();
             Employees.Clear();
-            foreach (var emp in db.Employees.ToList())
+            foreach (var emp in list)
                 Employees.Add(emp);
         }
 
@@ -61,26 +72,44 @@ namespace Organization.ViewModels
             NewEmployeeName = string.Empty;
             NewEmployeePosition = string.Empty;
             NewEmployeeSalary = string.Empty;
+            FormErrorMessage = string.Empty;
             IsAddEmployeeFormVisible = true;
             OnPropertyChanged(nameof(NewEmployeeName));
             OnPropertyChanged(nameof(NewEmployeePosition));
             OnPropertyChanged(nameof(NewEmployeeSalary));
         }
 
-        private void AddOrUpdateEmployee()
+        private async Task AddOrUpdateEmployeeAsync()
         {
-            if (string.IsNullOrWhiteSpace(NewEmployeeName)) return;
-            decimal.TryParse(NewEmployeeSalary, out var salary);
+            FormErrorMessage = string.Empty;
+            if (string.IsNullOrWhiteSpace(NewEmployeeName))
+            {
+                FormErrorMessage = "Name is required.";
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(NewEmployeePosition))
+            {
+                FormErrorMessage = "Position is required.";
+                return;
+            }
+            if (!decimal.TryParse(NewEmployeeSalary, NumberStyles.Number, CultureInfo.InvariantCulture, out var salary) || salary <= 0)
+            {
+                FormErrorMessage = "Salary must be a positive number.";
+                return;
+            }
 
             using var db = new OrganizationDbContext();
             if (EditingEmployee != null)
             {
-                // Update existing employee
-                EditingEmployee.Name = NewEmployeeName;
-                EditingEmployee.Position = NewEmployeePosition;
-                EditingEmployee.Salary = salary;
-                db.Employees.Update(EditingEmployee);
-                db.SaveChanges();
+                // Fetch tracked entity and update
+                var tracked = await db.Employees.FindAsync(EditingEmployee.Id);
+                if (tracked != null)
+                {
+                    tracked.Name = NewEmployeeName;
+                    tracked.Position = NewEmployeePosition;
+                    tracked.Salary = salary;
+                    await db.SaveChangesAsync();
+                }
                 EditingEmployee = null;
             }
             else
@@ -88,14 +117,14 @@ namespace Organization.ViewModels
                 // Add new employee
                 var emp = new Employee { Name = NewEmployeeName, Position = NewEmployeePosition, Salary = salary };
                 db.Employees.Add(emp);
-                db.SaveChanges();
-                Employees.Add(emp);
+                await db.SaveChangesAsync();
             }
 
-            LoadEmployeesFromDatabase();
+            await LoadEmployeesFromDatabaseAsync();
             NewEmployeeName = string.Empty;
             NewEmployeePosition = string.Empty;
             NewEmployeeSalary = string.Empty;
+            FormErrorMessage = string.Empty;
             IsAddEmployeeFormVisible = false;
             OnPropertyChanged(nameof(NewEmployeeName));
             OnPropertyChanged(nameof(NewEmployeePosition));
@@ -108,6 +137,7 @@ namespace Organization.ViewModels
             NewEmployeeName = string.Empty;
             NewEmployeePosition = string.Empty;
             NewEmployeeSalary = string.Empty;
+            FormErrorMessage = string.Empty;
             IsAddEmployeeFormVisible = false;
             OnPropertyChanged(nameof(NewEmployeeName));
             OnPropertyChanged(nameof(NewEmployeePosition));
@@ -121,7 +151,8 @@ namespace Organization.ViewModels
                 EditingEmployee = emp;
                 NewEmployeeName = emp.Name;
                 NewEmployeePosition = emp.Position;
-                NewEmployeeSalary = emp.Salary.ToString();
+                NewEmployeeSalary = emp.Salary.ToString(CultureInfo.InvariantCulture);
+                FormErrorMessage = string.Empty;
                 IsAddEmployeeFormVisible = true;
                 OnPropertyChanged(nameof(NewEmployeeName));
                 OnPropertyChanged(nameof(NewEmployeePosition));
@@ -129,14 +160,18 @@ namespace Organization.ViewModels
             }
         }
 
-        private void DeleteEmployee(object? parameter)
+        private async Task DeleteEmployeeAsync(object? parameter)
         {
             if (parameter is Employee emp)
             {
                 using var db = new OrganizationDbContext();
-                db.Employees.Remove(emp);
-                db.SaveChanges();
-                Employees.Remove(emp);
+                var tracked = await db.Employees.FindAsync(emp.Id);
+                if (tracked != null)
+                {
+                    db.Employees.Remove(tracked);
+                    await db.SaveChangesAsync();
+                }
+                await LoadEmployeesFromDatabaseAsync();
             }
         }
 
